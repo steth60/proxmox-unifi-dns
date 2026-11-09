@@ -60,8 +60,9 @@ else
     ok "standalone node"
     CLUSTER=no
 fi
+REACHABLE=yes
 timeout 5 bash -c "</dev/tcp/$UNIFI_HOST/443" 2>/dev/null && ok "UniFi console $UNIFI_HOST reachable" \
-    || fail "cannot reach $UNIFI_HOST:443"
+    || { REACHABLE=no; warn "cannot reach $UNIFI_HOST:443: fix the address in Proxmox > Datacenter > UniFi DNS > Setup"; }
 existing=""
 for f in $CONF $OLD_CONFS; do [ -f "$f" ] && { existing=$f; break; }; done
 if [ -n "$existing" ]; then ok "existing config $existing"; else ok "no config yet (first install)"; fi
@@ -88,6 +89,32 @@ install -d -m 700 /var/lib/pve-unifi-dns && chmod 700 /var/lib/pve-unifi-dns
 install -m 755 "$HERE/pve-unifi-dns.py" /usr/local/bin/pve-unifi-dns.py
 install -m 644 "$HERE/pve-unifi-dns.service" "$HERE/pve-unifi-dns.timer" /etc/systemd/system/
 did "sync script and timer units"
+
+# ------------------------------------------------------------- web UI tab --
+if [ "$INSTALL_UI" = yes ]; then
+    step "Datacenter > UniFi DNS tab"
+    install -m 755 "$HERE/pve-unifi-dns-ui.py" /usr/local/bin/pve-unifi-dns-ui.py
+    install -m 755 "$HERE/pve-unifi-dns-ui-patch" /usr/local/sbin/pve-unifi-dns-ui-patch
+    install -d /usr/local/share/pve-unifi-dns
+    install -m 644 "$HERE/ui/unifi-dns-tab.js" /usr/local/share/pve-unifi-dns/unifi-dns-tab.js
+    rm -f /usr/local/share/pve-unifi-dns/index.html
+    install -m 644 "$HERE/99pve-unifi-dns-ui" /etc/apt/apt.conf.d/99pve-unifi-dns-ui
+    install -m 644 "$HERE/pve-unifi-dns-ui.service" /etc/systemd/system/
+    install -d -m 700 /var/lib/pve-unifi-dns
+    [ -f /var/lib/pve-unifi-dns/index.html.tpl.orig ] \
+        || cp /usr/share/pve-manager/index.html.tpl /var/lib/pve-unifi-dns/index.html.tpl.orig
+    systemctl daemon-reload
+    systemctl stop pve-unifi-dns-ui.service 2>/dev/null || true
+    if ss -ltnH 'sport = :8009' | grep -q .; then
+        fail "port 8009 is used by another program on this node: $(ss -ltnpH 'sport = :8009' | grep -o 'users:.*' | head -1)"
+    fi
+    systemctl enable -q pve-unifi-dns-ui.service
+    systemctl start pve-unifi-dns-ui.service
+    /usr/local/sbin/pve-unifi-dns-ui-patch >/dev/null
+    sleep 1
+    systemctl is-active -q pve-unifi-dns-ui.service && ok "service on port 8009" || fail "pve-unifi-dns-ui did not start"
+    grep -q unifi-dns-tab /usr/share/pve-manager/index.html.tpl && ok "tab added to the Proxmox UI" || fail "UI patch missing"
+fi
 
 # ----------------------------------------------------------------- config --
 step "Config $CONF (root only)"
@@ -130,9 +157,16 @@ with open(conf, "w") as fh:
 print("   done  UNIFI_HOST=%s DOMAIN=%s RUN_ON_NODE=%s%s" % (
     want["UNIFI_HOST"], want["DOMAIN"], want["RUN_ON_NODE"], ", API key updated" if "UNIFI_API_KEY" in want else ""))
 PY
-if [ "$NO_KEY" = no ]; then
-    /usr/local/bin/pve-unifi-dns.py --list >/dev/null 2>"$HERE/.err" && ok "UniFi API key works" \
-        || { cat "$HERE/.err"; rm -f "$HERE/.err"; fail "UniFi API call failed"; }
+if [ "$REACHABLE" = no ]; then
+    NO_KEY=yes
+elif [ "$NO_KEY" = no ]; then
+    if /usr/local/bin/pve-unifi-dns.py --list >/dev/null 2>"$HERE/.err"; then
+        ok "UniFi API key works"
+    else
+        sed 's/^/   /' "$HERE/.err"
+        warn "UniFi API call failed: check the key in Proxmox > Datacenter > UniFi DNS > Setup"
+        NO_KEY=yes
+    fi
     rm -f "$HERE/.err"
 fi
 
@@ -160,32 +194,6 @@ if [ "$INSTALL_LLDP" = yes ]; then
             || { apt-get update -q >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -q lldpd >/dev/null; }
         did "installed, $(systemctl is-active lldpd)"
     fi
-fi
-
-# ------------------------------------------------------------- web UI tab --
-if [ "$INSTALL_UI" = yes ]; then
-    step "Datacenter > UniFi DNS tab"
-    install -m 755 "$HERE/pve-unifi-dns-ui.py" /usr/local/bin/pve-unifi-dns-ui.py
-    install -m 755 "$HERE/pve-unifi-dns-ui-patch" /usr/local/sbin/pve-unifi-dns-ui-patch
-    install -d /usr/local/share/pve-unifi-dns
-    install -m 644 "$HERE/ui/unifi-dns-tab.js" /usr/local/share/pve-unifi-dns/unifi-dns-tab.js
-    rm -f /usr/local/share/pve-unifi-dns/index.html
-    install -m 644 "$HERE/99pve-unifi-dns-ui" /etc/apt/apt.conf.d/99pve-unifi-dns-ui
-    install -m 644 "$HERE/pve-unifi-dns-ui.service" /etc/systemd/system/
-    install -d -m 700 /var/lib/pve-unifi-dns
-    [ -f /var/lib/pve-unifi-dns/index.html.tpl.orig ] \
-        || cp /usr/share/pve-manager/index.html.tpl /var/lib/pve-unifi-dns/index.html.tpl.orig
-    systemctl daemon-reload
-    systemctl stop pve-unifi-dns-ui.service 2>/dev/null || true
-    if ss -ltnH 'sport = :8009' | grep -q .; then
-        fail "port 8009 is used by another program on this node: $(ss -ltnpH 'sport = :8009' | grep -o 'users:.*' | head -1)"
-    fi
-    systemctl enable -q pve-unifi-dns-ui.service
-    systemctl start pve-unifi-dns-ui.service
-    /usr/local/sbin/pve-unifi-dns-ui-patch >/dev/null
-    sleep 1
-    systemctl is-active -q pve-unifi-dns-ui.service && ok "service on port 8009" || fail "pve-unifi-dns-ui did not start"
-    grep -q unifi-dns-tab /usr/share/pve-manager/index.html.tpl && ok "tab added to the Proxmox UI" || fail "UI patch missing"
 fi
 
 # ------------------------------------------------------------------- ACME --
