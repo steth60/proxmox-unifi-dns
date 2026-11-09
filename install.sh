@@ -18,7 +18,7 @@
 #   PUD_REPO=owner/repo   PUD_REF=branch-or-tag   (where to download from)
 
 set -Eeuo pipefail
-trap 'rc=$?; printf " \033[01;31mERROR\033[m %s line %s: \"%s\" exited with %s\n" "${BASH_SOURCE##*/}" "$LINENO" "$BASH_COMMAND" "$rc" >&2' ERR
+trap 'rc=$?; printf " \033[01;31mERROR\033[m %s line %s: \"%s\" exited with %s\n" install.sh "$LINENO" "$BASH_COMMAND" "$rc" >&2' ERR
 
 APP="UniFi DNS for Proxmox"
 REPO="${PUD_REPO:-steth60/proxmox-unifi-dns}"
@@ -113,7 +113,7 @@ snapshot() {
 log "===== install.sh $* from $REPO@$REF (SELF_DIR=$SELF_DIR)"
 snapshot "before"
 BASH_XTRACEFD=$LOGFD
-PS4='+ ${BASH_SOURCE##*/}:${LINENO}: '
+PS4='+ install.sh:${LINENO}: '
 set -x
 command -v pveversion >/dev/null || die "this is not a Proxmox VE host"
 PVE_MAJOR=$(pveversion | sed -n 's|^pve-manager/\([0-9]*\)\..*|\1|p')

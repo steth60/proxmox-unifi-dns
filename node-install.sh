@@ -20,7 +20,7 @@
 set -Eeuo pipefail
 VERBOSE=${VERBOSE:-no}
 # On any failure, say which command failed, where, and with what exit code.
-trap 'rc=$?; [[ $BASH_COMMAND == return* ]] || printf "   ERROR %s line %s: \"%s\" exited with %s\n" "${BASH_SOURCE##*/}" "$LINENO" "$BASH_COMMAND" "$rc" >&2' ERR
+trap 'rc=$?; [[ $BASH_COMMAND == return* ]] || printf "   ERROR %s line %s: \"%s\" exited with %s\n" node-install.sh "$LINENO" "$BASH_COMMAND" "$rc" >&2' ERR
 # Hide a command's output unless this is a verbose install.
 quiet() {
     local rc=0 out
@@ -28,7 +28,7 @@ quiet() {
     if [ "$VERBOSE" = yes ]; then "$@" || rc=$?; else "$@" >"$out" 2>&1 || rc=$?; fi
     if [ "$rc" -ne 0 ]; then
         [ "$VERBOSE" = yes ] || tail -20 "$out" | sed 's/^/   | /' >&2
-        printf '   ERROR %s line %s: "%s" exited with %s\n' "${BASH_SOURCE[1]##*/}" "${BASH_LINENO[0]}" "$*" "$rc" >&2
+        printf '   ERROR %s line %s: "%s" exited with %s\n' "${BASH_SOURCE[1]:-node-install.sh}" "${BASH_LINENO[0]}" "$*" "$rc" >&2
     fi
     rm -f "$out"
     return "$rc"
