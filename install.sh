@@ -28,10 +28,13 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
 fi
 
 RD=$'\033[01;31m'; GN=$'\033[1;92m'; YW=$'\033[33m'; BL=$'\033[36m'; CL=$'\033[m'; BLD=$'\033[1m'
-msg_info()  { printf ' %s...\r' "${YW}$1${CL}"; }
-msg_ok()    { printf ' \033[K%s✔%s %s\n' "$GN" "$CL" "$1"; }
-msg_warn()  { printf ' \033[K%s!%s %s\n' "$YW" "$CL" "$1"; }
-msg_error() { printf ' \033[K%s✖%s %s\n' "$RD" "$CL" "$1" >&2; }
+LOG=/var/log/pve-unifi-dns-install.log
+LOGFD=""
+log()       { [ -z "$LOGFD" ] || printf '%s %s\n' "$(date +%T)" "$*" >&"$LOGFD"; }
+msg_info()  { log "INFO  $1"; printf ' %s...\r' "${YW}$1${CL}"; }
+msg_ok()    { log "OK    $1"; printf ' \033[K%s✔%s %s\n' "$GN" "$CL" "$1"; }
+msg_warn()  { log "WARN  $1"; printf ' \033[K%s!%s %s\n' "$YW" "$CL" "$1"; }
+msg_error() { log "ERROR $1"; printf ' \033[K%s✖%s %s\n' "$RD" "$CL" "$1" >&2; }
 die()       { msg_error "$1"; exit 1; }
 
 header_info() {
@@ -62,6 +65,53 @@ done
 
 # ---------------------------------------------------------------- checks --
 [ "$(id -u)" -eq 0 ] || die "run this as root on the Proxmox VE host"
+
+# Everything goes to $LOG: a trace of every command, the full output of the node
+# installer, and a snapshot of the node before and after. The API key is never traced.
+exec {LOGFD}>>"$LOG"
+chmod 600 "$LOG"
+on_exit() {
+    local rc=$?
+    { set +x; } 2>/dev/null
+    [ -n "${WORK:-}" ] && rm -rf "$WORK"
+    if [ "$rc" -ne 0 ]; then
+        log "exit code $rc"
+        snapshot "after failure"
+        printf '\n %sFailed.%s Full log: %s\n' "$RD" "$CL" "$LOG" >&2
+        printf ' Send that file when asking for help (it does not contain the API key).\n' >&2
+    fi
+}
+trap on_exit EXIT
+snapshot() {
+    (
+        set +e +o pipefail
+        echo "----- node snapshot: $1"
+        echo "## pveversion -v"; pveversion -v 2>&1 | head -20
+        echo "## hostname"; hostname -f 2>&1
+        echo "## addresses"; ip -br -4 a 2>&1
+        echo "## routes"; ip -4 route 2>&1
+        echo "## resolv.conf"; cat /etc/resolv.conf 2>&1
+        echo "## cluster"; pvecm status 2>&1 | head -15
+        echo "## port 8009"; ss -ltnp 'sport = :8009' 2>&1
+        echo "## units"; systemctl is-active pve-unifi-dns.timer pve-unifi-dns-ui.service pveproxy.service lldpd.service 2>&1
+        echo "## files"; ls -l /usr/local/bin/pve-unifi-dns*.py /usr/local/sbin/pve-unifi-dns-ui-patch \
+            /usr/share/pve-manager/js/unifi-dns-tab.js /etc/apt/apt.conf.d/99pve-unifi-dns-ui 2>&1
+        echo "## template"; grep -n 'pvemanagerlib\|unifi-dns-tab' /usr/share/pve-manager/index.html.tpl 2>&1
+        echo "## config (key hidden)"
+        for f in "$CONF" /etc/pve/pve-unifi-dns.conf /etc/pve-unifi-dns.conf; do
+            [ -f "$f" ] && { echo "# $f"; sed 's/^\(UNIFI_API_KEY=\).\{1,\}/\1<set>/' "$f"; }
+        done
+        echo "## console 443"; timeout 5 bash -c "</dev/tcp/$(sed -n 's/^UNIFI_HOST=//p' "$CONF" 2>/dev/null | head -1 || echo none)/443" 2>&1 && echo reachable || echo "not reachable or not configured"
+        echo "## journal pve-unifi-dns-ui"; journalctl -u pve-unifi-dns-ui -n 30 --no-pager 2>&1
+        echo "## journal pve-unifi-dns"; journalctl -u pve-unifi-dns -n 30 --no-pager 2>&1
+        echo "----- end snapshot"
+    ) >&"$LOGFD" 2>&1
+}
+log "===== install.sh $* from $REPO@$REF (SELF_DIR=$SELF_DIR)"
+snapshot "before"
+BASH_XTRACEFD=$LOGFD
+PS4='+ ${BASH_SOURCE##*/}:${LINENO}: '
+set -x
 command -v pveversion >/dev/null || die "this is not a Proxmox VE host"
 PVE_MAJOR=$(pveversion | sed -n 's|^pve-manager/\([0-9]*\)\..*|\1|p')
 command -v python3 >/dev/null || die "python3 is missing"
@@ -171,6 +221,8 @@ NODE_SEARCH=$(pvesh get /nodes/"$NODE"/dns --output-format json 2>/dev/null | py
 UNIFI_HOST=${UNIFI_HOST:-$(conf_get UNIFI_HOST)}; UNIFI_HOST=${UNIFI_HOST:-$GW}
 DOMAIN=${DOMAIN:-$(conf_get DOMAIN)}; DOMAIN=${DOMAIN:-${NODE_SEARCH:-localdomain}}
 SET_NODE_DNS=${SET_NODE_DNS:-yes}; INSTALL_LLDP=${INSTALL_LLDP:-yes}
+{ set +x; } 2>/dev/null          # no tracing while the API key is in a variable
+log "trace paused while the API key is handled"
 KEY="${UNIFI_API_KEY:-}"
 
 if [ "$UNATTENDED" = no ] && [ "${ASK:-yes}" = yes ]; then
@@ -193,7 +245,6 @@ fi
 
 # ------------------------------------------------------------- get files --
 WORK=$(mktemp -d /tmp/pve-unifi-dns.XXXXXX)
-trap 'rm -rf "$WORK"' EXIT
 if [ -f "$SELF_DIR/node-install.sh" ] && [ -f "$SELF_DIR/pve-unifi-dns.py" ]; then
     cp -a "$SELF_DIR/." "$WORK/"
     msg_ok "Using files from $SELF_DIR ($(cat "$SELF_DIR/VERSION" 2>/dev/null || echo dev))"
@@ -206,13 +257,16 @@ fi
 if [ -n "$KEY" ]; then
     ( umask 077; printf '%s\n' "$KEY" > "$WORK/.apikey" )
 fi
+log "API key given in this run: $([ -f "$WORK/.apikey" ] && echo yes || echo no)"
 unset KEY UNIFI_API_KEY
+log "settings: UNIFI_HOST=$UNIFI_HOST DOMAIN=$DOMAIN SET_NODE_DNS=$SET_NODE_DNS INSTALL_LLDP=$INSTALL_LLDP"
+set -x
 
 # --------------------------------------------------------------- install --
 echo
 env UNIFI_HOST="$UNIFI_HOST" DOMAIN="$DOMAIN" SET_NODE_DNS="$SET_NODE_DNS" \
-    INSTALL_LLDP="$INSTALL_LLDP" INSTALL_UI=yes ACME=no \
-    bash "$WORK/node-install.sh" || die "installation stopped, see the messages above"
+    INSTALL_LLDP="$INSTALL_LLDP" INSTALL_UI=yes ACME=no BASH_XTRACEFD="$LOGFD" PS4="$PS4" \
+    bash -x "$WORK/node-install.sh" 2>&1 | tee -a "$LOG" || die "installation stopped, see the messages above"
 
 ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo
@@ -220,3 +274,6 @@ msg_ok "${BLD}$APP is installed on $NODE${CL}"
 echo "   Open https://${ADDR:-$NODE}:8006, reload the page, then Datacenter > UniFi DNS."
 grep -qs '^UNIFI_API_KEY=.' "$CONF" || echo "   The Setup window opens there to finish: enter the UniFi API key and save."
 echo "   Update or remove later by running this installer again."
+echo "   Log of this run: $LOG"
+{ set +x; } 2>/dev/null
+snapshot "after install"
