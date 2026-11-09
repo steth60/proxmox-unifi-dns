@@ -6,6 +6,7 @@
 #
 # Options:
 #   --unattended            no dialogs; settings from the environment (see below)
+#   --verbose               show every command on screen as it runs
 #   --uninstall             remove it (asks whether to delete its DNS records too)
 #   --uninstall --purge     remove it and delete its DNS records and Notes lines, no questions
 #   --version               print the version and exit
@@ -17,6 +18,7 @@
 #   PUD_REPO=owner/repo   PUD_REF=branch-or-tag   (where to download from)
 
 set -Eeuo pipefail
+trap 'rc=$?; printf " \033[01;31mERROR\033[m %s line %s: \"%s\" exited with %s\n" "${BASH_SOURCE##*/}" "$LINENO" "$BASH_COMMAND" "$rc" >&2' ERR
 
 APP="UniFi DNS for Proxmox"
 REPO="${PUD_REPO:-steth60/proxmox-unifi-dns}"
@@ -51,10 +53,11 @@ ${CL}
 HDR
 }
 
-UNATTENDED=no; ACTION=""; PURGE=no
+UNATTENDED=no; ACTION=""; PURGE=no; VERBOSE=${VERBOSE:-no}
 for a in "$@"; do
     case "$a" in
         --unattended) UNATTENDED=yes ;;
+        --verbose) VERBOSE=yes ;;
         --uninstall) ACTION=uninstall ;;
         --purge) PURGE=yes ;;
         --version) cat "$SELF_DIR/VERSION" 2>/dev/null || curl -fsSL "https://raw.githubusercontent.com/$REPO/$REF/VERSION"; exit 0 ;;
@@ -147,8 +150,13 @@ uninstall() {
         msg_ok "Records and Notes lines removed"
     fi
     msg_info "Stopping services"
-    systemctl disable --now pve-unifi-dns.timer pve-unifi-dns-ui.service >/dev/null 2>&1 || true
-    systemctl stop pve-unifi-dns.service >/dev/null 2>&1 || true
+    if [ "$VERBOSE" = yes ]; then
+        systemctl disable --now pve-unifi-dns.timer pve-unifi-dns-ui.service || true
+        systemctl stop pve-unifi-dns.service || true
+    else
+        systemctl disable --now pve-unifi-dns.timer pve-unifi-dns-ui.service >/dev/null 2>&1 || true
+        systemctl stop pve-unifi-dns.service >/dev/null 2>&1 || true
+    fi
     msg_ok "Services stopped"
     msg_info "Removing the Proxmox UI tab"
     rm -f /etc/apt/apt.conf.d/99pve-unifi-dns-ui /usr/share/pve-manager/js/unifi-dns-tab.js
@@ -190,6 +198,17 @@ if [ "$ACTION" = uninstall ]; then
     exit 0
 fi
 
+ask_verbose() {
+    [ "$VERBOSE" = yes ] && return 0
+    if whiptail --backtitle "$APP" --title "Verbose install" --defaultno --yesno \
+"Show every command on screen while it installs?
+
+Choose Yes when troubleshooting. Either way the full log is written to
+$LOG" 11 74; then
+        VERBOSE=yes
+    fi
+}
+
 # --------------------------------------------------------- install/update --
 if [ "$UNATTENDED" = no ]; then
     if [ "$INSTALLED" = yes ]; then
@@ -200,6 +219,7 @@ if [ "$UNATTENDED" = no ]; then
             "settings" "Update and change the basic settings" 3>&1 1>&2 2>&3) || exit 0
         [ "$choice" = uninstall ] && { uninstall; exit 0; }
         [ "$choice" = update ] && ASK=no || ASK=yes
+        ask_verbose
     else
         whiptail --backtitle "$APP" --title "$APP" --yesno \
 "This installs on node $NODE:
@@ -212,6 +232,7 @@ if [ "$UNATTENDED" = no ]; then
 Needs a UniFi OS console (UniFi Network 9 or newer) and an API key.
 Continue?" 17 74 || exit 0
         ASK=yes
+        ask_verbose
     fi
 fi
 
@@ -259,13 +280,19 @@ if [ -n "$KEY" ]; then
 fi
 log "API key given in this run: $([ -f "$WORK/.apikey" ] && echo yes || echo no)"
 unset KEY UNIFI_API_KEY
-log "settings: UNIFI_HOST=$UNIFI_HOST DOMAIN=$DOMAIN SET_NODE_DNS=$SET_NODE_DNS INSTALL_LLDP=$INSTALL_LLDP"
+log "settings: UNIFI_HOST=$UNIFI_HOST DOMAIN=$DOMAIN SET_NODE_DNS=$SET_NODE_DNS INSTALL_LLDP=$INSTALL_LLDP VERBOSE=$VERBOSE"
+TRACEFD=$LOGFD
+if [ "$VERBOSE" = yes ]; then
+    exec {TRACEFD}> >(tee -a "$LOG" >&2)
+    BASH_XTRACEFD=$TRACEFD
+    msg_ok "Verbose: every command is shown below and logged to $LOG"
+fi
 set -x
 
 # --------------------------------------------------------------- install --
 echo
 env UNIFI_HOST="$UNIFI_HOST" DOMAIN="$DOMAIN" SET_NODE_DNS="$SET_NODE_DNS" \
-    INSTALL_LLDP="$INSTALL_LLDP" INSTALL_UI=yes ACME=no BASH_XTRACEFD="$LOGFD" PS4="$PS4" \
+    INSTALL_LLDP="$INSTALL_LLDP" INSTALL_UI=yes ACME=no VERBOSE="$VERBOSE" BASH_XTRACEFD="$TRACEFD" \
     bash -x "$WORK/node-install.sh" 2>&1 | tee -a "$LOG" || die "installation stopped, see the messages above"
 
 ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')

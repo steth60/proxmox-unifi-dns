@@ -17,7 +17,22 @@
 #   .apikey         UniFi API key (only needed on first install or to change it)
 #   .acme-data      DNS provider credentials for ACME, KEY=value lines
 
-set -euo pipefail
+set -Eeuo pipefail
+VERBOSE=${VERBOSE:-no}
+# On any failure, say which command failed, where, and with what exit code.
+trap 'rc=$?; [[ $BASH_COMMAND == return* ]] || printf "   ERROR %s line %s: \"%s\" exited with %s\n" "${BASH_SOURCE##*/}" "$LINENO" "$BASH_COMMAND" "$rc" >&2' ERR
+# Hide a command's output unless this is a verbose install.
+quiet() {
+    local rc=0 out
+    out=$(mktemp)
+    if [ "$VERBOSE" = yes ]; then "$@" || rc=$?; else "$@" >"$out" 2>&1 || rc=$?; fi
+    if [ "$rc" -ne 0 ]; then
+        [ "$VERBOSE" = yes ] || tail -20 "$out" | sed 's/^/   | /' >&2
+        printf '   ERROR %s line %s: "%s" exited with %s\n' "${BASH_SOURCE[1]##*/}" "${BASH_LINENO[0]}" "$*" "$rc" >&2
+    fi
+    rm -f "$out"
+    return "$rc"
+}
 HERE=$(cd "$(dirname "$0")" && pwd)
 cleanup() { for f in "$HERE/.apikey" "$HERE/.acme-data"; do [ -f "$f" ] && shred -u "$f" 2>/dev/null || rm -f "$f"; done; }
 trap cleanup EXIT
@@ -110,7 +125,7 @@ if [ "$INSTALL_UI" = yes ]; then
     fi
     systemctl enable -q pve-unifi-dns-ui.service
     systemctl start pve-unifi-dns-ui.service
-    /usr/local/sbin/pve-unifi-dns-ui-patch >/dev/null
+    quiet /usr/local/sbin/pve-unifi-dns-ui-patch
     sleep 1
     systemctl is-active -q pve-unifi-dns-ui.service && ok "service on port 8009" || fail "pve-unifi-dns-ui did not start"
     grep -q unifi-dns-tab /usr/share/pve-manager/index.html.tpl && ok "tab added to the Proxmox UI" || fail "UI patch missing"
@@ -190,8 +205,9 @@ if [ "$INSTALL_LLDP" = yes ]; then
     if dpkg -s lldpd >/dev/null 2>&1; then
         ok "installed, $(systemctl is-active lldpd)"
     else
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -q lldpd >/dev/null 2>&1 \
-            || { apt-get update -q >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -q lldpd >/dev/null; }
+        export DEBIAN_FRONTEND=noninteractive
+        quiet apt-get install -y -q lldpd \
+            || { quiet apt-get update -q && quiet apt-get install -y -q lldpd; }
         did "installed, $(systemctl is-active lldpd)"
     fi
 fi
