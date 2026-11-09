@@ -82,7 +82,15 @@ existing=""
 for f in $CONF $OLD_CONFS; do [ -f "$f" ] && { existing=$f; break; }; done
 if [ -n "$existing" ]; then ok "existing config $existing"; else ok "no config yet (first install)"; fi
 NO_KEY=no
-if [ ! -f "$HERE/.apikey" ] && ! grep -qs '^UNIFI_API_KEY=.' $CONF $OLD_CONFS; then
+# true when a real UniFi API key is saved (empty or the old template placeholder is not one)
+has_key() {
+    local f
+    for f in "$@"; do
+        [ -f "$f" ] && grep '^UNIFI_API_KEY=' "$f" | grep -qv -e '=$' -e '=paste-your-key-here$' && return 0
+    done
+    return 1
+}
+if [ ! -f "$HERE/.apikey" ] && ! has_key $CONF $OLD_CONFS; then
     NO_KEY=yes
     warn "no UniFi API key yet: finish in Proxmox > Datacenter > UniFi DNS > Setup"
 fi

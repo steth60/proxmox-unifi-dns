@@ -97,6 +97,8 @@ def load_conf(explicit=None):
             conf[k] = os.environ[k]
     for k in BOOL_KEYS:
         conf[k] = str(conf[k]).lower() in ("1", "true", "yes")
+    if conf["UNIFI_API_KEY"] == "paste-your-key-here":     # placeholder left by version 0.1.x installs
+        conf["UNIFI_API_KEY"] = ""
     conf["_path"] = used
     return conf
 
@@ -629,7 +631,6 @@ def manage(args, uni, domain, owned):
     """--list / --add / --add-cname / --remove. Returns an exit code."""
     if args.list:
         rows = sorted(uni.dns_list(), key=lambda r: (r.get("record_type", ""), r["key"].lower()))
-        recs = by_name(rows)
         w = max([len(r["key"]) for r in rows] + [4])
         print("  %-5s %-*s  %s" % ("TYPE", w, "NAME", "VALUE"))
         for r in rows:

@@ -123,6 +123,14 @@ NODE=$(hostname -s)
 INSTALLED=no
 [ -f /usr/local/bin/pve-unifi-dns.py ] && INSTALLED=yes
 
+# true when a real UniFi API key is saved (empty or the old template placeholder is not one)
+has_key() {
+    local f
+    for f in "$@"; do
+        [ -f "$f" ] && grep '^UNIFI_API_KEY=' "$f" | grep -qv -e '=$' -e '=paste-your-key-here$' && return 0
+    done
+    return 1
+}
 conf_get() { [ -f "$CONF" ] || return 0; sed -n "s/^$1=//p" "$CONF" | head -1; }
 
 header_info
@@ -143,7 +151,7 @@ uninstall() {
             PURGE=yes
         fi
     fi
-    if [ "$PURGE" = yes ] && [ -x /usr/local/bin/pve-unifi-dns.py ] && grep -qs '^UNIFI_API_KEY=.' "$CONF"; then
+    if [ "$PURGE" = yes ] && [ -x /usr/local/bin/pve-unifi-dns.py ] && has_key "$CONF"; then
         msg_info "Deleting this node's records from UniFi"
         systemctl stop pve-unifi-dns.timer 2>/dev/null || true
         /usr/local/bin/pve-unifi-dns.py --purge 2>&1 | tail -1 | sed 's/^/   /'
@@ -253,7 +261,7 @@ if [ "$UNATTENDED" = no ] && [ "${ASK:-yes}" = yes ]; then
     DOMAIN=$(whiptail --backtitle "$APP" --title "Domain" --inputbox \
         "Local DNS domain. Guests become <guest>.<domain>.\nUse the Domain Name set on your UniFi networks:" 10 70 "$DOMAIN" 3>&1 1>&2 2>&3) || exit 0
     opts=$(whiptail --backtitle "$APP" --title "Options" --separate-output --checklist \
-        "Also do on this node (space to toggle):" 12 74 2 \
+        "Also do on this node (space to toggle):" 12 86 2 \
         "dns"  "Use $UNIFI_HOST as this node's DNS server, search $DOMAIN" ON \
         "lldp" "Install lldpd so UniFi shows guests under this host" ON 3>&1 1>&2 2>&3) || exit 0
     SET_NODE_DNS=no; INSTALL_LLDP=no
@@ -298,7 +306,7 @@ ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo
 msg_ok "${BLD}$APP is installed on $NODE${CL}"
 echo "   Open https://${ADDR:-$NODE}:8006, reload the page, then Datacenter > UniFi DNS."
-grep -qs '^UNIFI_API_KEY=.' "$CONF" || echo "   The Setup window opens there to finish: enter the UniFi API key and save."
+has_key "$CONF" || echo "   The Setup window opens there to finish: enter the UniFi API key and save."
 echo "   Update or remove later by running this installer again."
 echo "   Log of this run: $LOG"
 { set +x; } 2>/dev/null
