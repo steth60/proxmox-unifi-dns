@@ -1,0 +1,29 @@
+# Settings for ./setup.sh. Copy to setup.conf and edit. No secrets in here,
+# only paths to the files that hold them.
+
+# UniFi console (gateway) and the API key file
+# (UniFi OS > Settings > Control Plane > Integrations > Create API Key; save the key in this file).
+# Leave the key file out to enter the key in Proxmox instead (Datacenter > UniFi DNS > Setup).
+UNIFI_HOST=192.168.1.1
+UNIFI_API_KEY_FILE=~/.config/pve-unifi-dns/apikey
+
+# Local DNS domain for every record: <guest>.<DOMAIN>, <node>.<DOMAIN>.
+# Use the same value as the Domain Name on your UniFi networks.
+# For trusted certificates (ACME below) this must be a subdomain of a domain you own,
+# e.g. lan.example.com.
+DOMAIN=localdomain
+
+# What setup does on each node
+SET_NODE_DNS=yes      # node resolver = UNIFI_HOST (or DNS_SERVER), search domain = DOMAIN
+INSTALL_LLDP=yes      # lldpd, so UniFi shows guests under their host
+INSTALL_UI=yes        # Datacenter > UniFi DNS tab in Proxmox
+#DNS_SERVER=          # resolver for the nodes, default UNIFI_HOST
+
+# Trusted certificate for <node>.<DOMAIN> from Let's Encrypt, via your public DNS provider.
+# Needs DOMAIN under a domain you own. Nothing is exposed to the internet.
+ACME=no
+ACME_EMAIL=you@example.com
+ACME_PLUGIN_ID=dns                       # any name for the plugin in Proxmox
+ACME_DNS_API=cf                          # acme.sh name of your DNS provider: cf, hetzner, gandi_livedns, ...
+ACME_DNS_DATA_FILE=~/.config/pve-unifi-dns/acme-dns.txt   # provider credentials, KEY=value lines (e.g. CF_Token=...)
+#ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory   # staging, for a first test

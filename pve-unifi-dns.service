@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync Proxmox guest names into UniFi local DNS
+After=network-online.target pve-cluster.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pve-unifi-dns.py

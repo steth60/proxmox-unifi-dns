@@ -1,0 +1,12 @@
+# personal settings and secrets
+setup.conf
+*.apikey
+.apikey
+.acme-data
+acme-dns.txt
+*.pem
+*.key
+# local clutter
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,26 @@
+#!/bin/sh
+# Adds the UniFi DNS tab to the Proxmox web UI. Safe to run any number of times.
+# Runs after every apt/dpkg action (see /etc/apt/apt.conf.d/99pve-unifi-dns-ui),
+# because a pve-manager update replaces the template it patches.
+SRC=/usr/local/share/pve-unifi-dns/unifi-dns-tab.js
+DST=/usr/share/pve-manager/js/unifi-dns-tab.js
+TPL=/usr/share/pve-manager/index.html.tpl
+[ -f "$SRC" ] && [ -f "$TPL" ] || exit 0
+
+changed=0
+if ! cmp -s "$SRC" "$DST"; then
+    cp "$SRC" "$DST" && changed=1
+fi
+ver=$(md5sum "$SRC" | cut -c1-8)
+tag="    <script type=\"text/javascript\" src=\"/pve2/js/unifi-dns-tab.js?ver=$ver\"></script>"
+if ! grep -qF "unifi-dns-tab.js?ver=$ver" "$TPL"; then
+    sed -i '/unifi-dns-tab\.js/d' "$TPL"
+    sed -i "/pvemanagerlib\.js/a\\
+$tag" "$TPL"
+    changed=1
+fi
+if [ "$changed" = 1 ]; then
+    systemctl reload-or-restart pveproxy.service
+    echo "pve-unifi-dns: UniFi DNS tab installed in the Proxmox UI"
+fi
+exit 0

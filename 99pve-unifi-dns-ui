@@ -1,0 +1,2 @@
+// Re-add the UniFi DNS tab after pve-manager updates replace the UI template.
+DPkg::Post-Invoke { "if [ -x /usr/local/sbin/pve-unifi-dns-ui-patch ]; then /usr/local/sbin/pve-unifi-dns-ui-patch || true; fi"; };

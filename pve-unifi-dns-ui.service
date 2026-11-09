@@ -1,0 +1,12 @@
+[Unit]
+Description=UniFi DNS for Proxmox: API for the Datacenter > UniFi DNS tab (port 8009)
+After=network-online.target pve-cluster.service pveproxy.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/pve-unifi-dns-ui.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
