@@ -13,7 +13,7 @@
 #
 # Environment for --unattended (all optional on updates; existing settings are kept):
 #   UNIFI_HOST  UniFi console address      DOMAIN        local DNS domain
-#   UNIFI_API_KEY  API key (or enter it later in Proxmox > Datacenter > UniFi DNS > Setup)
+#   UNIFI_API_KEY  optional; normally entered after install in Proxmox > Datacenter > UniFi DNS > Setup
 #   SET_NODE_DNS=yes|no   INSTALL_LLDP=yes|no
 #   PUD_REPO=owner/repo   PUD_REF=branch-or-tag   (where to download from)
 
@@ -229,8 +229,9 @@ if [ "$UNATTENDED" = no ]; then
  - Datacenter > UniFi DNS in the Proxmox web UI, with a Setup window
  - a small API service on port 8009 used by that tab
 
-Needs a UniFi OS console (UniFi Network 9 or newer) and an API key.
-Continue?" 17 74 || exit 0
+Needs a UniFi OS console (UniFi Network 9 or newer). The UniFi API key
+is entered afterwards in Proxmox > Datacenter > UniFi DNS > Setup.
+Continue?" 18 74 || exit 0
         ASK=yes
         ask_verbose
     fi
@@ -251,8 +252,6 @@ if [ "$UNATTENDED" = no ] && [ "${ASK:-yes}" = yes ]; then
         "Address of the UniFi console (gateway) that holds your local DNS:" 9 70 "$UNIFI_HOST" 3>&1 1>&2 2>&3) || exit 0
     DOMAIN=$(whiptail --backtitle "$APP" --title "Domain" --inputbox \
         "Local DNS domain. Guests become <guest>.<domain>.\nUse the Domain Name set on your UniFi networks:" 10 70 "$DOMAIN" 3>&1 1>&2 2>&3) || exit 0
-    KEY=$(whiptail --backtitle "$APP" --title "UniFi API key" --passwordbox \
-        "UniFi OS > Settings > Control Plane > Integrations > Create API Key.\n\nLeave empty to keep the saved key, or to enter it later in\nProxmox > Datacenter > UniFi DNS > Setup." 13 74 3>&1 1>&2 2>&3) || exit 0
     opts=$(whiptail --backtitle "$APP" --title "Options" --separate-output --checklist \
         "Also do on this node (space to toggle):" 12 74 2 \
         "dns"  "Use $UNIFI_HOST as this node's DNS server, search $DOMAIN" ON \
