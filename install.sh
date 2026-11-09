@@ -123,7 +123,7 @@ NODE=$(hostname -s)
 INSTALLED=no
 [ -f /usr/local/bin/pve-unifi-dns.py ] && INSTALLED=yes
 
-conf_get() { sed -n "s/^$1=//p" "$CONF" 2>/dev/null | head -1; }
+conf_get() { [ -f "$CONF" ] || return 0; sed -n "s/^$1=//p" "$CONF" | head -1; }
 
 header_info
 if [ -n "$PVE_MAJOR" ] && [ "$PVE_MAJOR" -lt 8 ]; then

@@ -139,7 +139,10 @@ if [ ! -f "$CONF" ] && [ -n "$existing" ] && [ "$existing" != "$CONF" ]; then
 fi
 RUN_ON=""
 [ "$CLUSTER" = no ] && RUN_ON=$NODE
-[ "$CLUSTER" = yes ] && RUN_ON=$(sed -n 's/^RUN_ON_NODE=//p' "$CONF" 2>/dev/null | head -1) && RUN_ON=${RUN_ON:-$NODE}
+if [ "$CLUSTER" = yes ]; then
+    [ -f "$CONF" ] && RUN_ON=$(sed -n 's/^RUN_ON_NODE=//p' "$CONF" | head -1)
+    RUN_ON=${RUN_ON:-$NODE}
+fi
 UNIFI_HOST="$UNIFI_HOST" DOMAIN="$DOMAIN" RUN_ON="$RUN_ON" python3 - "$CONF" "$HERE/pve-unifi-dns.conf" "$HERE/.apikey" <<'PY'
 import os, re, sys
 conf, template, keyfile = sys.argv[1:4]
