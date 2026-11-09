@@ -227,19 +227,28 @@ Ext.define('PVE.UnifiDNS.SetupWindow', {
         let me = this;
         let form = me.form.getForm();
         if (!form.isValid()) {
-            let bad = form.getFields().findBy((f) => !f.isValid());
-            if (bad) {
-                let tabs = me.down('tabpanel');
-                let tab = tabs.items.findBy((t) => t.contains(bad));
-                if (tab) {
-                    tabs.setActiveTab(tab);
-                }
-                bad.focus();
+            let bad = form.getFields().filterBy((f) => !f.isValid()).getRange();
+            let tabs = me.down('tabpanel');
+            let tab = bad.length && tabs.items.findBy((t) => t.contains(bad[0]));
+            if (tab) {
+                tabs.setActiveTab(tab);
             }
+            if (bad.length) {
+                bad[0].focus();
+            }
+            let names = bad.map((f) => {
+                let label = (f.getFieldLabel && f.getFieldLabel()) || f.name || f.getId();
+                let errs = f.getErrors ? f.getErrors() : [];
+                return Ext.String.htmlEncode(label + (errs.length ? ': ' + errs[0] : ''));
+            });
+            console.warn('UniFi DNS Setup: invalid fields', bad);
+            Ext.Msg.alert(gettext('Error'), gettext('Not saved. Fix these fields first:') + '<br>' + names.join('<br>'));
             return;
         }
         me.setLoading(gettext('Saving...'));
-        PVE.UnifiDNS.call('/api/config', me.values()).then(
+        let values = me.values();
+        console.info('UniFi DNS Setup: saving', Object.keys(values));
+        PVE.UnifiDNS.call('/api/config', values).then(
             () => {
                 me.setLoading(false);
                 me.onSaved();
@@ -247,6 +256,7 @@ Ext.define('PVE.UnifiDNS.SetupWindow', {
             },
             (err) => {
                 me.setLoading(false);
+                console.error('UniFi DNS Setup: save failed', err);
                 PVE.UnifiDNS.error(err);
             },
         );

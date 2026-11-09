@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -369,6 +370,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return origin
 
     def _send(self, code, body, ctype="application/json; charset=utf-8", extra=None):
+        if code >= 400 and isinstance(body, dict):
+            log("%s %s refused (%d): %s; origin=%s host=%s", self.command, self.path.split("?")[0], code,
+                body.get("message"), self.headers.get("Origin"), self.headers.get("Host"))
         data = body if isinstance(body, bytes) else json.dumps(body).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -464,6 +468,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(409, {"ok": False, "message": "not set up yet: use Setup"})
         except RuntimeError as e:
             self._send(502, {"ok": False, "message": str(e)})
+        except Exception as e:
+            log("GET %s failed: %s", url.path, traceback.format_exc())
+            self._send(500, {"ok": False, "message": "%s: %s" % (type(e).__name__, e)})
 
     def do_POST(self):
         url = urllib.parse.urlparse(self.path)
@@ -497,6 +504,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, {"ok": False, "message": "not found"})
         except (ValueError, RuntimeError) as e:
             self._send(400 if isinstance(e, ValueError) else 502, {"ok": False, "message": str(e)})
+        except Exception as e:                       # never drop the connection without an answer
+            log("POST %s failed: %s", url.path, traceback.format_exc())
+            self._send(500, {"ok": False, "message": "%s: %s" % (type(e).__name__, e)})
 
 
 CERT_PAIRS = (("/etc/pve/local/pveproxy-ssl.pem", "/etc/pve/local/pveproxy-ssl.key"),
